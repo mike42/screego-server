@@ -4,6 +4,8 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/go-ldap/ldap/v3"
 	"io"
 	"net/http"
 	"os"
@@ -103,7 +105,7 @@ func (u *Users) Authenticate(w http.ResponseWriter, r *http.Request) {
 	user := r.FormValue("user")
 	pass := r.FormValue("pass")
 
-	if !u.Validate(user, pass) {
+	if !u.ValidateLdap(user, pass) {
 		w.WriteHeader(401)
 		_ = json.NewEncoder(w).Encode(&Response{
 			Message: "could not authenticate",
@@ -129,6 +131,27 @@ func (u *Users) Authenticate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u Users) Validate(user, password string) bool {
+	return u.ValidateLdap(user, password)
+}
+
+func (u Users) ValidatePasswd(user, password string) bool {
 	realPassword, exists := u.Lookup[user]
 	return exists && bcrypt.CompareHashAndPassword([]byte(realPassword), []byte(password)) == nil
+}
+
+func (u Users) ValidateLdap(user, password string) bool {
+	l, err := ldap.DialURL("ldap://127.0.0.1")
+	if err != nil {
+		log.Warn().Msg("connect failed")
+		return false
+	}
+	defer l.Close()
+	bindUser := fmt.Sprintf("uid=%s,cn=users,cn=accounts,dc=example,dc=test", user)
+	err = l.Bind(bindUser, password)
+	if err != nil {
+		log.Warn().Msg("auth failed")
+		return false
+	}
+	log.Warn().Msg("auth ok")
+	return true
 }
